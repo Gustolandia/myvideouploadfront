@@ -1,70 +1,162 @@
-# Getting Started with Create React App
+# My Video Upload Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A React-based frontend application for managing video uploads, designed to interface with our Node.js backend. This application provides a responsive UI for users to authenticate, upload videos, and interact with various scheduling and processing features offered by the backend.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Technologies Used](#technologies-used)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Environment Configuration](#environment-configuration)
+- [Available Scripts](#available-scripts)
+- [Development](#development)
+- [Deployment](#deployment)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+
+## Overview
+
+The **My Video Upload Frontend** application is built with [React](https://reactjs.org/) and [Create React App](https://create-react-app.dev/). It offers an intuitive UI for uploading videos, scheduling uploads via cron jobs, and interfacing with various external APIs through a secure backend.
+
+This project is structured to work seamlessly with our Node.js backend service, ensuring smooth communication via REST APIs and secure authentication.
+
+## Features
+
+- **Video Upload Interface**: Easily upload videos with drag-and-drop or file selection.
+- **Responsive Design**: Built with Bootstrap and React-Bootstrap for a modern, responsive layout.
+- **API Integration**: Connects to backend endpoints for handling video processing and scheduling.
+- **Environment Configuration**: Uses environment variables for API URLs and keys.
+- **Testing Framework**: Integrated with Testing Library for unit and component testing.
+
+## Technologies Used
+
+- **React** and **React-DOM**: For building the user interface.
+- **Create React App**: Bootstrap application setup.
+- **Bootstrap & React-Bootstrap**: Styling and layout components.
+- **Testing Library**: For unit and integration testing of UI components.
+- **ESLint**: Ensures code quality and maintainability.
+
+## Getting Started
+
+Follow these instructions to set up and run the project locally.
+
+### Prerequisites
+
+Make sure you have the following installed on your machine:
+
+- [Node.js](https://nodejs.org/en/) (version 14 or higher)
+- [npm](https://www.npmjs.com/) (comes with Node.js)
+
+### Installation
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/yourusername/myvideouploadfront.git
+   cd myvideouploadfront
+   ```
+
+2. **Install dependencies:**
+
+   ```bash
+   npm install
+   ```
+
+### Environment Configuration
+
+Create a `.env` file in the project root with the following configuration:
+
+```dotenv
+REACT_APP_BACKEND_URL=https://miserably-light-wallaby.ngrok-free.app
+PORT=3001
+REACT_APP_CRON_JOB_API_KEY=MgzLumx3jiolk+DOAXlFRY6pae1/JvRmc1RT9vFYBKc=
+```
+
+> **Note:**  
+> Environment variables in Create React App must be prefixed with `REACT_APP_` to be available in your application. Ensure that `.env` is added to your `.gitignore` file if it contains sensitive information.
 
 ## Available Scripts
 
 In the project directory, you can run:
 
-### `npm start`
+- **Start the development server:**
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+  ```bash
+  npm start
+  ```
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- **Build the app for production:**
 
-### `npm test`
+  ```bash
+  npm run build
+  ```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- **Run tests:**
 
-### `npm run build`
+  ```bash
+  npm test
+  ```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+- **Eject:**
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+  ```bash
+  npm run eject
+  ```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Development
 
-### `npm run eject`
+During development, you’ll primarily use the `npm start` script. If you need to configure any additional tools, consider integrating your own ESLint or Prettier configurations.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Proxy Setup (Optional)
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+If your React app makes frequent API calls to your backend during development, consider adding a proxy field to your `package.json`:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+```json
+"proxy": "http://localhost:3000"
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Deployment
 
-## Learn More
+To deploy your application:
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+1. Build the project using:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+   ```bash
+   npm run build
+   ```
 
-### Code Splitting
+2. Serve the content of the `build` directory with a static server:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+   ```bash
+   npm install -g serve
+   serve -s build
+   ```
 
-### Analyzing the Bundle Size
+## Testing
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+This project utilizes [Testing Library](https://testing-library.com/) for component testing. To run the tests:
 
-### Making a Progressive Web App
+```bash
+npm test
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Contributing
 
-### Advanced Configuration
+1. Fork the repository.
+2. Create a new branch: `git checkout -b feature/your-feature-name`
+3. Commit your changes: `git commit -am 'Add new feature'`
+4. Push the branch: `git push origin feature/your-feature-name`
+5. Open a pull request.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## License
 
-### Deployment
+This project is licensed under the [MIT License](LICENSE).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## Contact
 
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+For any questions or support, please open an issue or contact the project maintainer at [your.email@example.com](mailto:your.email@example.com).
