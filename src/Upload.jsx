@@ -1,24 +1,44 @@
-import React, { useState, useRef } from "react";
-import { Container, Row, Col, Button, Alert, Form } from "react-bootstrap";
+import React, { useState, useRef, useEffect } from "react";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import {
+  Container,
+  Row,
+  Col,
+  Button,
+  Alert,
+  Form,
+  ProgressBar,
+  Spinner,
+} from "react-bootstrap";
 
 function Upload() {
-  // Minimal state: only messages, file selection and scheduled date/time.
+  // Minimal state: only messages and file selection.
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [file, setFile] = useState(null);
-  const [scheduledAt, setScheduledAt] = useState("");
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  // Refs for text inputs (uncontrolled)
+  // scheduledAt as a ref instead of state
+  const scheduledAtRef = useRef(null);
+
+  const ffmpegLoadedRef = useRef(false);
+
+  // Refs for uncontrolled inputs
   const titleRef = useRef(null);
   const descriptionRef = useRef(null);
   const tagsRef = useRef(null);
   const privacyStatusRef = useRef(null);
   const categoryIdRef = useRef(null);
 
-  // Use a ref for thumbnailOffset to avoid re-rendering on every update
+  // Thumbnail offset & video refs
   const thumbnailOffsetRef = useRef(0);
+  const videoRef = useRef(null);
+  const offsetInputRef = useRef(null);
+  const totalFramesRef = useRef(0);
 
-  // Video categories and privacy options
+  // Video categories and privacy options (unchanged)
   const videoCategories = [
     { name: "Film & Animation", value: "1" },
     { name: "Autos & Vehicles", value: "2" },
@@ -52,94 +72,297 @@ function Upload() {
     { name: "Shows", value: "43" },
     { name: "Trailers", value: "44" },
   ];
-
   const privacyOptions = [
     { name: "Default", value: "Default" },
     { name: "Public", value: "public" },
     { name: "Private", value: "private" },
   ];
 
-  // Base URL from .env or fallback.
   const baseUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
 
-  // Ref for the video element.
-  const videoRef = useRef(null);
-  // Ref for the read-only input showing thumbnail offset.
-  const offsetInputRef = useRef(null);
+  // FFmpeg setup (use the factory, not `new`)
+  const ffmpeg = useRef(new FFmpeg({ log: true })).current;
 
-  // Update thumbnailOffset imperatively when the video time updates.
+  useEffect(() => {
+    const onLog = ({ message }) => {
+      const m = message.match(/frame=\s*(\d+)/);
+      if (m && totalFramesRef.current) {
+        const current = parseInt(m[1], 10);
+        const pct = Math.round((current / totalFramesRef.current) * 100);
+        console.log(
+          `⚡ manual progress: ${current}/${totalFramesRef.current} → ${pct}%`
+        );
+        setProgress(pct);
+      }
+    };
+
+    ffmpeg.on("log", onLog);
+    return () => {
+      ffmpeg.off("log", onLog);
+    };
+  }, [ffmpeg]);
+
+  const MAX_MS = 2 * 60 * 1000 + 20 * 1000 - 1; // 140 000 ms − 1
+  const TARGET_W = 720;
+  const TARGET_H = 1280;
+
+  // Update thumbnailOffset without re-render
   const handleTimeUpdate = () => {
     if (videoRef.current && offsetInputRef.current) {
-      const currentTimeInMs = Math.floor(videoRef.current.currentTime * 1000);
-      thumbnailOffsetRef.current = currentTimeInMs;
-      // Update the DOM element without triggering re-renders.
-      offsetInputRef.current.value = currentTimeInMs;
+      const ms = Math.floor(videoRef.current.currentTime * 1000);
+      thumbnailOffsetRef.current = ms;
+      offsetInputRef.current.value = String(ms);
     }
   };
 
-  // Handle file changes.
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
-    if (selectedFile) {
-      setFile(selectedFile);
+  // File selector + auto‑reformat
+  const handleFileChange = async (e) => {
+    const selectedFile = e.target.files?.[0] || null;
+    if (!selectedFile) {
+      setFile(null);
+      return;
     }
+
+    // Probe dimensions & duration
+    const probe = document.createElement("video");
+    probe.src = URL.createObjectURL(selectedFile);
+    await new Promise((res) => (probe.onloadedmetadata = res));
+    const w = probe.videoWidth,
+      h = probe.videoHeight,
+      duration = probe.duration;
+    URL.revokeObjectURL(probe.src);
+
+    const isVertical = h / w >= 16 / 9;
+    const durationMs = Math.floor(duration * 1000);
+
+    if (!isVertical || durationMs > MAX_MS) {
+      const ok = window.confirm(
+        `Your clip is ${w}×${h}, ${Math.round(durationMs / 1000)}s long.\n` +
+          `Shorts require 9:16 and ≤ 140 000 ms.\nRe‑format now?`
+      );
+      if (!ok) {
+        setFile(null);
+        return;
+      }
+
+      try {
+        setIsPreparing(true);
+
+        // Load FFmpeg if not already loaded
+        if (!ffmpegLoadedRef.current) {
+          await ffmpeg.load();
+          ffmpegLoadedRef.current = true;
+        }
+
+        // Write input file
+        const buf = new Uint8Array(await selectedFile.arrayBuffer());
+        console.log("🧪 Input file size:", buf.length);
+
+        try {
+          await ffmpeg.writeFile("in.mp4", buf);
+        } catch (err) {
+          console.error("❌ Failed to write in.mp4:", err);
+          alert("Error writing video into FFmpeg memory.");
+          return;
+          setIsPreparing(false);
+        }
+
+        // Verify file exists
+        const files = await ffmpeg.listDir("/");
+        console.log("📂 FFmpeg root contents:", files);
+        const hasInput = files.some(
+          (file) => file.name === "in.mp4" && !file.isDir
+        );
+        if (!hasInput) {
+          throw new Error("'in.mp4' not found in FFmpeg virtual filesystem.");
+        }
+
+        let frameOutput = "";
+        const logHandler = ({ type, message }) => {
+          if (type === "stdout" || type === "stderr") {
+            frameOutput += message + "\n";
+          }
+        };
+        ffmpeg.on("log", logHandler);
+
+        // Run a dummy conversion to count frames (emit progress)
+        await ffmpeg.exec([
+          "-i",
+          "in.mp4",
+          "-f",
+          "null",
+          "-progress",
+          "pipe:1",
+          "-",
+        ]);
+
+        ffmpeg.off("log", logHandler);
+
+        // Extract last "frame=" entry from logs
+        const lines = frameOutput.split("\n");
+        const lastFrameLine = lines
+          .reverse()
+          .find((line) => line.startsWith("frame="));
+        if (!lastFrameLine) {
+          throw new Error("Could not extract frame count from FFmpeg output.");
+        }
+        totalFramesRef.current = parseInt(
+          lastFrameLine.replace("frame=", "").trim(),
+          10
+        );
+        console.log("🎯 Total frames =", totalFramesRef.current);
+
+        // Build filter: scale and pad
+        const padFilter =
+          `scale=${TARGET_W}:-2,` +
+          `pad=${TARGET_W}:${TARGET_H}:(ow-iw)/2:(oh-ih)/2:black`;
+
+        const args = [
+          "-i",
+          "in.mp4",
+          "-vf",
+          padFilter,
+          "-t",
+          (MAX_MS / 1000).toFixed(3),
+          "-c:a",
+          "copy",
+          "out.mp4",
+        ];
+
+        console.log("🚀 Starting ffmpeg.exec with:", args);
+        setIsPreparing(false);
+
+        setIsProcessing(true);
+        await ffmpeg.exec(args);
+        console.log("✅ ffmpeg.exec complete");
+        setIsProcessing(false);
+
+        // Read result
+        const data = await ffmpeg.readFile("out.mp4");
+        const blob = new Blob([data], { type: "video/mp4" });
+        const newFile = new File([blob], selectedFile.name, {
+          type: "video/mp4",
+        });
+
+        setFile(newFile);
+        ffmpeg.off("log", logHandler);
+        return;
+      } catch (err) {
+        console.error("❌ FFmpeg processing failed:", err);
+        alert(
+          "An error occurred during video processing.\nDetails: " + err.message
+        );
+        setIsProcessing(false);
+        setIsPreparing(false);
+
+        setFile(null);
+        return;
+      }
+    }
+
+    console.log("✅ File meets criteria, using original");
+    setFile(selectedFile);
   };
 
-  // Handle scheduledAt input changes.
-  const handleScheduledAtChange = (e) => {
-    setScheduledAt(e.target.value);
-  };
-
-  // Retrieve all input values from refs and perform the upload.
+  // Build form data & post
   const handleUpload = async () => {
     if (!file) {
       setError("Please select a video file to upload.");
       return;
     }
-    const title = titleRef.current.value;
-    const description = descriptionRef.current.value;
-    const tags = tagsRef.current.value;
-    const privacyStatus = privacyStatusRef.current.value;
-    const categoryId = categoryIdRef.current.value;
+    const title = titleRef.current?.value;
+    const description = descriptionRef.current?.value;
+    const tags = tagsRef.current?.value;
+    const privacyStatus = privacyStatusRef.current?.value;
+    const categoryId = categoryIdRef.current?.value;
+    const scheduledAt = scheduledAtRef.current?.value;
 
     const formData = new FormData();
-    // Note: The new endpoint expects the file under the key "videoFile"
     formData.append("videoFile", file);
     formData.append("title", title);
     formData.append("description", description);
     formData.append("tags", tags);
-    // Only include privacyStatus if not "Default".
     if (privacyStatus !== "Default") {
       formData.append("privacyStatus", privacyStatus);
     }
     formData.append("categoryId", categoryId);
-    formData.append("thumbnailOffset", thumbnailOffsetRef.current);
-    // Append the scheduled date/time.
+    formData.append("thumbnailOffset", String(thumbnailOffsetRef.current));
     formData.append("scheduledAt", scheduledAt);
 
+    setMessage("");
+    setError("");
     try {
-      setMessage("");
-      setError("");
-
-      const response = await fetch(`${baseUrl}/cronjobs`, {
+      const res = await fetch(`${baseUrl}/cronjobs`, {
         method: "POST",
         body: formData,
       });
-      const data = await response.json();
-      if (response.ok) {
-        setMessage("Cron job created successfully!");
-      } else {
-        setError(`Error: ${data.error}`);
-      }
+      const data = await res.json();
+      if (res.ok) setMessage("Cron job created successfully!");
+      else setError(`Error: ${data.error}`);
     } catch (err) {
-      console.error("Error during upload:", err);
+      console.error(err);
       setError("Unexpected error: " + err.message);
     }
   };
 
   return (
     <Container fluid className="p-0">
-      {/* Video player container: Always visible on top, with fixed height and black background */}
+      {isPreparing && !isProcessing && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            flexDirection: "column",
+            color: "white",
+            fontSize: "1.5rem",
+            fontWeight: "bold",
+          }}
+        >
+          <Spinner
+            animation="border"
+            role="status"
+            variant="light"
+            style={{ width: "3rem", height: "3rem", marginBottom: "1rem" }}
+          />
+          Preparing video... This operation might take some minutes. 
+        </div>
+      )}
+
+      {isProcessing && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <ProgressBar
+            now={progress}
+            label={`${progress}%`}
+            variant="info"
+            animated
+            striped
+            style={{ width: "50%" }}
+          />
+        </div>
+      )}
+
+      {/* Video preview */}
       <div
         style={{
           backgroundColor: "black",
@@ -152,7 +375,7 @@ function Upload() {
         {file ? (
           <video
             ref={videoRef}
-            style={{ maxHeight: "100%", maxWidth: "100%" }}
+            style={{ height: "100%", width: "auto" }}
             controls
             src={URL.createObjectURL(file)}
             onTimeUpdate={handleTimeUpdate}
@@ -167,10 +390,11 @@ function Upload() {
           <Col>
             <h1>Schedule Video Upload to Multiple Platforms</h1>
             <p>
-              Upload your video to be published on YouTube, TikTok, Instagram, Facebook, Threads, and X at a scheduled time!
+              Upload your video to be published on YouTube, TikTok, Instagram,
+              Facebook, Threads, and X at a scheduled time!
             </p>
 
-            {/* Video File Upload */}
+            {/* File input */}
             <Form.Group>
               <Form.Label>Select Video File</Form.Label>
               <Form.Control
@@ -180,90 +404,82 @@ function Upload() {
               />
             </Form.Group>
 
-            {/* Input for Scheduled Date & Time */}
+            {/* Scheduled time */}
             <Form.Group>
               <Form.Label>Scheduled Date &amp; Time</Form.Label>
-              <Form.Control
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={handleScheduledAtChange}
-              />
+              <Form.Control type="datetime-local" ref={scheduledAtRef} />
             </Form.Group>
 
-            {/* Video Information - Uncontrolled fields via refs */}
+            {/* Title */}
             <Form.Group>
               <Form.Label>Title</Form.Label>
               <Form.Control
                 type="text"
                 placeholder="Enter video title"
                 ref={titleRef}
-                defaultValue=""
               />
             </Form.Group>
 
+            {/* Description */}
             <Form.Group>
               <Form.Label>Description</Form.Label>
               <Form.Control
                 type="text"
                 placeholder="Enter video description"
                 ref={descriptionRef}
-                defaultValue=""
               />
             </Form.Group>
 
+            {/* Tags */}
             <Form.Group>
               <Form.Label>Tags (comma-separated)</Form.Label>
               <Form.Control
                 type="text"
                 placeholder="Enter tags"
                 ref={tagsRef}
-                defaultValue=""
               />
             </Form.Group>
 
+            {/* Privacy */}
             <Form.Group>
               <Form.Label>Privacy Status</Form.Label>
-              <Form.Control
-                as="select"
-                ref={privacyStatusRef}
-                defaultValue="public"
-              >
-                {privacyOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.name}
+              <Form.Control as="select" ref={privacyStatusRef}>
+                {privacyOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.name}
                   </option>
                 ))}
               </Form.Control>
             </Form.Group>
 
+            {/* Category */}
             <Form.Group>
               <Form.Label>Category</Form.Label>
               <Form.Control as="select" ref={categoryIdRef} defaultValue="1">
-                {videoCategories.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.name}
+                {videoCategories.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.name}
                   </option>
                 ))}
               </Form.Control>
             </Form.Group>
 
-            {/* Read-only display for thumbnail offset */}
+            {/* Thumbnail offset */}
             <Form.Group>
-              <Form.Label>Thumbnail Offset (in ms)</Form.Label>
+              <Form.Label>Thumbnail Offset (ms)</Form.Label>
               <Form.Control
-                ref={offsetInputRef}
                 plaintext
                 readOnly
-                defaultValue={0}
+                ref={offsetInputRef}
+                defaultValue="0"
               />
             </Form.Group>
 
-            {/* Upload Button */}
+            {/* Upload */}
             <Button className="m-2" onClick={handleUpload}>
               Schedule Video Upload
             </Button>
 
-            {/* Display success or error messages */}
             {message && (
               <Alert variant="success" className="mt-3">
                 {message}
